@@ -1,6 +1,6 @@
-# p5-Newts - a non-blocking Newts client for Perl
+# p5-Newts - Perl non-blocking Newts client
 
-This is a Perl module for accessing the [NEWTS](Newts) time-series database.
+This is a Perl module for accessing the [Newts] time-series database.
 
 * ![BUILD](https://travis-ci.org/rfdrake/p5-Newts.svg)
 
@@ -42,4 +42,4 @@ everything you need ahead of time then you can handle your other access via
 REST.
 
 
-[NEWTS]: http://newts.io
+[Newts]: http://newts.io
