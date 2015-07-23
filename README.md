@@ -1,4 +1,4 @@
-# p5-Newts - a non-blocking Newts client for Perl
+# p5-Newts - a non-blocking Newts client for Perl # ![BUILD](https://travis-ci.org/rfdrake/p5-Newts.svg)
 
 This is a Perl module for accessing the Newts time-series database.
 
@@ -8,23 +8,23 @@ This is a Perl module for accessing the Newts time-series database.
 
 * Datasources for generating reports need to be built in Java.  An example might be something like this
 
-import static org.opennms.newts.api.query.StandardAggregationFunctions.*;
-import org.opennms.newts.api.query.*;
-...
+    import static org.opennms.newts.api.query.StandardAggregationFunctions.*;
+    import org.opennms.newts.api.query.*;
+    ...
 
-CalculationFunction scaleToKbytes = new CalculationFunction() {
-    public double apply(double ds) {
-        return ds / 8 / 1024;
+    CalculationFunction scaleToKbytes = new CalculationFunction() {
+        public double apply(double ds) {
+            return ds / 8 / 1024;
+        }
     }
-}
 
-ResultDescriptor report = new ResultDescriptor(300)
-    .datasource("in",  "ifInOctets",  Duration.seconds(600), AVERAGE)
-    .datasource("out", "ifOutOctets", Duration.seconds(600), AVERAGE)
-    .calculate("inKbytes",  scaleToKbytes, "in")
-    .calculate("outKbytes", scaleToKbytes, "out")
-    .expression("sumKbytes", "inKbytes + outKbytes")
-    .export("inKbytes", "outKbytes", "sumKbytes");
+    ResultDescriptor report = new ResultDescriptor(300)
+        .datasource("in",  "ifInOctets",  Duration.seconds(600), AVERAGE)
+        .datasource("out", "ifOutOctets", Duration.seconds(600), AVERAGE)
+        .calculate("inKbytes",  scaleToKbytes, "in")
+        .calculate("outKbytes", scaleToKbytes, "out")
+        .expression("sumKbytes", "inKbytes + outKbytes")
+        .export("inKbytes", "outKbytes", "sumKbytes");
 
 
 Because I imagine that needs to be JIT compiled, or in some other way turned
