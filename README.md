@@ -1,6 +1,8 @@
-# p5-Newts - a non-blocking Newts client for Perl # ![BUILD](https://travis-ci.org/rfdrake/p5-Newts.svg)
+# p5-Newts - a non-blocking Newts client for Perl
 
-This is a Perl module for accessing the Newts time-series database.
+This is a Perl module for accessing the [NEWTS](Newts) time-series database.
+
+* ![BUILD](https://travis-ci.org/rfdrake/p5-Newts.svg)
 
 # Limitations
 
@@ -38,3 +40,6 @@ Anyway, this only affects building new types of reports, or looking at things
 in a different way, defining new aggregation periods.  If you define
 everything you need ahead of time then you can handle your other access via
 REST.
+
+
+[NEWTS]: http://newts.io
