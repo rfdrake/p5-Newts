@@ -8,6 +8,7 @@ This is a Perl module for accessing the Newts time-series database.
 
 * Datasources for generating reports need to be built in Java.  An example might be something like this
 
+    ```
     import static org.opennms.newts.api.query.StandardAggregationFunctions.*;
     import org.opennms.newts.api.query.*;
     ...
@@ -25,7 +26,7 @@ This is a Perl module for accessing the Newts time-series database.
         .calculate("outKbytes", scaleToKbytes, "out")
         .expression("sumKbytes", "inKbytes + outKbytes")
         .export("inKbytes", "outKbytes", "sumKbytes");
-
+    ```
 
 Because I imagine that needs to be JIT compiled, or in some other way turned
 into a complicated object, this may never be available to build on the fly via
