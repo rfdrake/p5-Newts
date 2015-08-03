@@ -2,11 +2,8 @@ use lib qw(lib);
 use Test::More;
 plan skip_all => 'No test server available';
 
-$ENV{PERL_ANYEVENT_STRICT}=1;
-$ENV{PERL_ANYEVENT_VERBOSE}=1;
-
+use EV;
 use AnyEvent;
-use AnyEvent::Strict;
 use Newts;
 
 # we need to be able to do idempotent get/puts in the database or blow away
@@ -70,17 +67,24 @@ $r = $n->search( 'the internet' );
 
 # async examples
 
-my $cv = AE::cv;
+my $n2 = Newts->new( async => 1 );
 
-my $n2 = Newts->new( async => 1, cv => $cv );
-
-for(1..100) {
-    $n2->put( { id => 'bb5-test-net', name => 'async_put', type => 'GAUGE', timestamp => 13, value => 3 } )->cb(sub { $_[0]->recv; });
+my $idx=0;
+my $done_count=0;
+# doesn't really work because all of them have the same timestamp when
+# inserted, but the idea is to send a bunch of things.
+for(1..10000) {
+    $n2->put( { id => 'bb5-test-net', name => 'async_put', type => 'GAUGE', value => 3 } )->cb( sub { shift->recv; ++$done_count; });
+    ++$idx;
 }
 
-$r = $n2->get('bb5-test-net')->cb(sub { $_[0]->recv; });
+my $wait = AE::cv;
+my $timer = AnyEvent->timer(interval => 1, cb => sub {
+    print "index = $idx, $done_count, ". AE::now. ' '. AE::time. "\n";
+    $wait->send if ($done_count == 10000);
+});
 
-$cv->recv;
+$wait->recv;
+
+my $r = $n2->get('bb5-test-net')->recv;
 use Data::Dumper; warn Dumper($r);
-
-

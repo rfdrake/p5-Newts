@@ -103,17 +103,13 @@ using AnyEvent or Coro, or something like it you can specify async => 1
 which will make all the methods non-blocking.  They will return a condvar
 and you can manage them however you wish.
 
-If you pass async then you will probably want to pass your own condvar,
-otherwise one will be made up by new().  I'm not sure if that matters
-since I have very minimal experience with AnyEvent programming.
-
 =cut
 
 sub new {
     my $class = shift;
     my $input = @_;
     my $headers = HTTP::Headers->new;
-    my $json = JSON->new->allow_nonref->utf8;
+    my $json = JSON->new->allow_nonref->allow_blessed->convert_blessed->utf8;
     $headers->push_header( 'Content-Type' => 'application/json; charset=utf-8', 'Accept-Encoding' => 'gzip,deflate' );
 
     my $self = bless {
@@ -124,14 +120,14 @@ sub new {
         @_,
     }, $class;
     $self->{uri} = URI->new($self->{uri});
-    $self->{cv} ||= AE::cv;
 
     return $self;
 }
 
-=head3 put
+=head2 put
 
     my $result = $newts->put( { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', value => 32.333 } );
+    my $result = $newts->put( { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', values => [ 32.333, 33 ] } );
 
 Description: Persist new samples
 
@@ -180,8 +176,7 @@ sub put {
     my $self = shift;
     my $uri = $self->uri . 'samples';
 
-    my $cv = $self->{cv};
-    AE::now_update();  # no idea why we do this.. :)
+    my $cv = AE::cv;
 
     my $query;
     for(@_) {
@@ -235,8 +230,7 @@ sub get {
 
     $uri->query_form( $query );
 
-    my $cv = $self->{cv};
-    AE::now_update();
+    my $cv = AE::cv;
 
     http_get( $uri->as_string,
         sub {
@@ -253,7 +247,6 @@ sub get {
         return $cv->recv;
     }
 }
-
 
 =head2 measure
 
@@ -310,8 +303,7 @@ sub measure {
 
     $uri->query_form( $query );
 
-    my $cv = $self->{cv};
-    AE::now_update();
+    my $cv = AE::cv;
 
     http_get( $uri->as_string,
         sub {
@@ -328,6 +320,90 @@ sub measure {
         return $cv->recv;
     }
 }
+
+=head2 post_measurements
+
+    $newts->post_measurements($interval, [ $datasource ], [ $expression ], [ $export ]);
+
+This sends a POST to /measurements.
+
+Arguments:
+  Interval in seconds, default '300s'.
+  Datasource: Arrayref of Newts::Datasource objects
+  Expressions: Arrayref of Newts::Expressions objects
+  Exports: Arrayref of strings.  These should be the labels for the datasource and expressions used
+
+Depending on how the Newts object was setup, this will block until completed
+or it will return a condvar to the calling program.
+
+Here is an example of a raw JSON post sent through curl, in case that is needed for
+troubleshooting:
+
+    curl -X POST  -H "Accept: application/json" -H "Content-Type:
+    application/json" -u admin:admin  -d @newts.json
+    'http://127.0.0.1:18080/measurements/localhost:chassis:temps?start=1998-07-09T12:05:00-0500&end=1998-07-09T13:15:00-0500'
+
+    And newts.json contains:
+    {
+        "interval": "300s",
+        "datasources": [
+            {
+                "label": "ds1",
+                "source": "inlet",
+                "function": "AVERAGE",
+                "heartbeat": "600s"
+            }
+        ],
+        "expressions": [
+            {
+                "label": "ds1-2x",
+                "expression": "2 * ds1"
+            }
+        ],
+        "exports": [
+            "ds1",
+            "ds1-2x"
+        ]
+    }
+
+=cut
+
+sub post_measurements {
+    my $self = shift;
+    my $uri = $self->uri . 'measurements';
+    my $cv = AE::cv;
+
+    my $interval = shift;
+    $interval ||= '300s';
+    $interval =~ s/^(\d+)$/$1s/;
+    my $datasources = shift;
+    my $expressions = shift;
+    my $exports = shift;
+
+    http_request(
+        POST    => $uri,
+        headers => $self->headers,
+        body    => $self->json->encode($interval, $datasources, $expressions, $exports),
+        sub {
+            my ($data, $headers) = @_;
+            my $response;
+            eval { $response = $self->json->decode($data); };
+            if ($headers->{Status} >= 400) {
+                $cv->croak("Error with HTTP Request: ". $headers->{Status} . ' '. $headers->{Reason} .' '.  $headers->{URL});
+            } else {
+                $cv->send($response);
+            }
+        }
+    );
+
+    if ($self->{async}) {
+        return $cv;
+    } else {
+        return $cv->recv;
+    }
+
+}
+
 
 =head2 search
 
@@ -350,8 +426,7 @@ sub search {
     my ($search) = (@_);
     my $uri = $self->uri .  "/search/?q=$search";
 
-    my $cv = $self->{cv};
-    AE::now_update();
+    my $cv = AE::cv;
 
     http_get( $uri,
         sub {
@@ -367,6 +442,38 @@ sub search {
     } else {
         $cv->recv;
     }
+}
+
+1;
+
+package Newts::Expressions;
+
+sub new {
+    my $class = shift;
+    my $h = {
+            'label' => '',
+            'expression' => '',
+            @_,
+    };
+    my $self = bless $h, $class;
+}
+
+1;
+
+package Newts::Datasources;
+
+sub new {
+    my $class = shift;
+    my $h = {
+            'label' => '',
+            'source' => '',
+            'function' => 'AVERAGE',
+            'heartbeat' => '600s',
+            @_,
+    };
+    my $self = bless $h, $class;
+
+    $self->{heartbeat} =~ s/^(\d+)$/$1s/;
 }
 
 1;
