@@ -22,7 +22,7 @@ Getting information about a Newts server:
 
   my $newts = Newts->new();
   $newts->put({ id => $id, name => $name, type => $type, value => $value, timestamp => $timestamp });
-  $newts->get($id, $start, $end);
+  $newts->get( $id, $start, $end );
   $newts->measure();
   $newts->search($query);
 
@@ -124,26 +124,6 @@ sub new {
     return $self;
 }
 
-=head2 put
-
-    my $result = $newts->put( { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', value => 32.333 } );
-    my $result = $newts->put( { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', values => [ 32.333, 33 ] } );
-
-Description: Persist new samples
-
-Optional: attributes (associative array).  This can be in the main object or
-under the resource where the id is stored.
-
-Optional: timestamp (time in milliseconds).  This defaults to Perl time*1000.
-
-Note: the "type" attribute is one of: COUNTER or GAUGE.
-
-Success Response:    201 Created
-Error Response:  400 Bad Request
-
-=cut
-
-
 sub _build_query {
     my $opt = shift;
     my $queries;
@@ -172,31 +152,75 @@ sub _build_query {
     return $queries;
 }
 
-sub put {
+# this is the default callback we'll be using for almost any sub
+sub _cvcb {
     my $self = shift;
+    my $args = shift;
+    my $cv = $args->{cv} || $self->{cv} || AE::cv;
+    $args->{on_success} ||= $args->{on_response};
+
+    my $cb = sub {
+        my ($data, $headers) = @_;
+        my $response;
+        eval { $response = $self->json->decode($data); };
+        if ($headers->{Status} >= 400) {
+            if ($args->{on_error}) {
+                $args->{on_error}->(@_);
+            } else {
+                $cv->croak("Error with HTTP Request: ". $headers->{Status} . ' '. $headers->{Reason} .' '.  $headers->{URL});
+            }
+        } else {
+            if ($args->{on_success}) {
+                $args->{on_success}->($response);
+            } else {
+                $cv->send($response);
+            }
+        }
+    };
+
+    ($cv, $cb);
+}
+
+
+=head2 put
+
+    my $result = $newts->put( data => { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', value => 32.333 } );
+    my $result = $newts->put( data => { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', values => [ 32.333, 33 ] } );
+
+Description: Persist new samples
+
+Optional: attributes (associative array).  This can be in the main object or
+under the resource where the id is stored.
+
+Optional: timestamp (time in milliseconds).  This defaults to Perl time*1000.
+
+Note: the "type" attribute is one of: COUNTER or GAUGE.
+
+Success Response:    201 Created
+Error Response:  400 Bad Request
+
+=cut
+
+
+sub put {
+    my ($self, %args) = @_;
+    my ($cv, $cb) = $self->_cvcb(\%args);
     my $uri = $self->uri . 'samples';
 
-    my $cv = AE::cv;
-
     my $query;
-    for(@_) {
-        push(@$query, @{_build_query($_)});
+    if (ref($args{data}) eq 'ARRAY') {
+        for(@{$args{data}}) {
+            push(@$query, @{_build_query($_)});
+        }
+    } else {
+        $query = _build_query($args{data});
     }
 
     http_request(
         POST    => $uri,
         headers => $self->headers,
         body    => $self->json->encode($query),
-        sub {
-            my ($data, $headers) = @_;
-            my $response;
-            eval { $response = $self->json->decode($data); };
-            if ($headers->{Status} >= 400) {
-                $cv->croak("Error with HTTP Request: ". $headers->{Status} . ' '. $headers->{Reason} .' '.  $headers->{URL});
-            } else {
-                $cv->send($response);
-            }
-        }
+        $cb
     );
 
     if ($self->{async}) {
@@ -208,7 +232,7 @@ sub put {
 
 =head2 get
 
-    my $samples = $newts->get($id,$start,$end);
+    my $samples = $newts->get( resource => $id, start => $start, end => $end);
 
 Description:   Query for raw (unaggregated) samples.
 
@@ -220,26 +244,17 @@ Error Response:  (none)
 =cut
 
 sub get {
-    my $self = shift;
-    my ($resource, $start, $end) = (@_);
-    $end ||= time;
-    my $uri = URI->new($self->uri . "samples/$resource");
+    my ($self, %args) = @_;
+    my ($cv, $cb) = $self->_cvcb(\%args);
+    my $uri = URI->new($self->uri . "samples/$args{resource}");
     my $query = {};
-    $query->{start}=$start if ($start);
-    $query->{end}=$end if ($end);
+    $query->{start}=$args{start} if ($args{start});
+    $args{end} ||= time if ($args{start});
+    $query->{end}=$args{end} if ($args{end});
 
     $uri->query_form( $query );
 
-    my $cv = AE::cv;
-
-    http_get( $uri->as_string,
-        sub {
-            my ($data, $headers) = @_;
-            my $response;
-            eval { $response = $self->json->decode($data); };
-            $cv->send($response);
-        }
-    );
+    http_get( $uri->as_string, $cb );
 
     if ($self->{async}) {
         return $cv;
@@ -250,19 +265,24 @@ sub get {
 
 =head2 measure
 
-    my $measurements = $newts->measure($id,$report,$resolution,$start,end);
+    my $measurements = $newts->measure( resource => $id,
+                                        report => $report,
+                                        resolution => $resolution,
+                                        start => $start,
+                                        end => $end);
 
 Description:     Query for aggregated measurements.
 
+resource=[string]
+
+    The required name of the device you are asking about.
+
 report=[string]
 
-Currently you will need to use another language to define your report.
-According to the wiki they use a Fluent interface to build the report
-definition https://github.com/OpenNMS/newts/wiki/ReportDefinitions
-
-Once the report is defined in your database, you can run measurements against
-it by referencing it via REST here.  By default a report called "temps" is
-defined.
+    This is a precompiled aggregation report that is built through using
+$newts->post_measurements, or via an external interface.  By default, at least
+in the vagrant-newts test system, there is a test report called 'temps' that
+is used for sensor data they imported from weather stations.
 
 resolution=[period]
 
@@ -280,7 +300,7 @@ start=[timespec]
     Query start time, specified as seconds since the Unix epoch, or an ISO 8601 timestamp.
 end=[timespec]
     Query end time, specified as seconds since the Unix epoch, or an ISO 8601 timestamp.
-
+    If you specify a start time but not an end time then this defaults to perl's time()
 
 Method returns an array of "row" arrays, each containing one or more
 measurement representation objects. The inner, or "row" arrays contain results
@@ -292,27 +312,26 @@ Error Response:  (none)
 =cut
 
 sub measure {
-    my $self = shift;
-    my ($id, $report, $res, $start, $end) = (@_);
-    $res ||= '15m';
+    my ($self, %args) = @_;
+    my ($cv, $cb) = $self->_cvcb(\%args);
     my $uri = URI->new($self->uri);
-    $uri->path("/measurements/$report/$id");
-    my $query = { 'resolution' => $res };
-    $query->{start}=$start if ($start);
-    $query->{end}=$end if ($end);
+    $args{report} ||= 'temps';
+
+    # I should convert this into an Exception
+    if (!defined($args{resource})) {
+        die "resource not defined.";
+    }
+    $uri->path("/measurements/$args{report}/$args{resource}");
+
+    $args{resolution} ||= '15m';
+    my $query = { 'resolution' => $args{resolution} };
+    $query->{start}=$args{start} if ($args{start});
+    $args{end} ||= time if ($args{start});
+    $query->{end}=$args{end} if ($args{end});
 
     $uri->query_form( $query );
 
-    my $cv = AE::cv;
-
-    http_get( $uri->as_string,
-        sub {
-            my ($data, $headers) = @_;
-            my $response;
-            eval { $response = $self->json->decode($data); };
-            $cv->send($response);
-        }
-    );
+    http_get( $uri->as_string, $cb );
 
     if ($self->{async}) {
         return $cv;
@@ -323,7 +342,7 @@ sub measure {
 
 =head2 post_measurements
 
-    $newts->post_measurements($interval, [ $datasource ], [ $expression ], [ $export ]);
+    $newts->post_measurements(interval => $interval, datasources => [ $ds ], expressions => [ $expression ], exports => [ $export ] ]);
 
 This sends a POST to /measurements.
 
@@ -369,31 +388,18 @@ troubleshooting:
 =cut
 
 sub post_measurements {
-    my $self = shift;
+    my ($self, %args) = @_;
     my $uri = $self->uri . 'measurements';
-    my $cv = AE::cv;
-
-    my $interval = shift;
-    $interval ||= '300s';
-    $interval =~ s/^(\d+)$/$1s/;
-    my $datasources = shift;
-    my $expressions = shift;
-    my $exports = shift;
+    my ($cv, $cb) = $self->_cvcb(\%args);
+    $args{interval} ||= '300s';
+    $args{interval} =~ s/^(\d+)$/$1s/;
 
     http_request(
         POST    => $uri,
         headers => $self->headers,
-        body    => $self->json->encode($interval, $datasources, $expressions, $exports),
-        sub {
-            my ($data, $headers) = @_;
-            my $response;
-            eval { $response = $self->json->decode($data); };
-            if ($headers->{Status} >= 400) {
-                $cv->croak("Error with HTTP Request: ". $headers->{Status} . ' '. $headers->{Reason} .' '.  $headers->{URL});
-            } else {
-                $cv->send($response);
-            }
-        }
+        body    => $self->json->encode( $args{interval}, $args{datasources},
+                                        $args{expressions}, $args{exports} ),
+        $cb
     );
 
     if ($self->{async}) {
@@ -407,7 +413,7 @@ sub post_measurements {
 
 =head2 search
 
-    my $result = $newts->search('query');
+    my $result = $newts->search(query => 'query');
 
 Description:     Search resources
 
@@ -422,20 +428,13 @@ Error Response:  (none)
 =cut
 
 sub search {
-    my $self = shift;
-    my ($search) = (@_);
-    my $uri = $self->uri .  "/search/?q=$search";
+    my ($self, %args) = @_;
+    my $search = $args{query};
+    my $uri = URI->new($self->uri .  "search/?q=$search");
 
-    my $cv = AE::cv;
+    my ($cv, $cb) = $self->_cvcb(\%args);
 
-    http_get( $uri,
-        sub {
-            my ($data, $headers) = @_;
-            my $response;
-            eval { $response = $self->json->decode($data); };
-            $cv->send($response);
-        }
-    );
+    http_get( $uri->as_string, $cb );
 
     if ($self->{async}) {
         return $cv;
@@ -445,6 +444,11 @@ sub search {
 }
 
 1;
+
+# I may convert these into Type::Tiny objects later so that we can put
+# constraints on function types and things like that.  Right now free form
+# text is probably ok because we're just puking it all into REST and letting
+# the newts backend handle errors. :)
 
 package Newts::Expressions;
 
