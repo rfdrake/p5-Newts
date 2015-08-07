@@ -12,6 +12,7 @@ recommends     'Math::BigInt::GMP' => '0.0';
 
 test_requires q(Test::Most) => 0.25;
 test_requires q(AnyEvent) => 0.0;
+test_requires q(EV) => 0.0;
 bugtracker q(https://github.com/rfdrake/p5-Newts/issues);
 homepage q(http://search.cpan.org/dist/Newts);
 repository q(git://github.com/rfdrake/p5-Newts.git);

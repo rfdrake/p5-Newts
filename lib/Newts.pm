@@ -84,12 +84,7 @@ JSON object reference
 
 sub json { $_[0]->{json} }
 
-
-# putting this here in case they decide to change to milliseconds
-sub _default_time { time * 1000; }
-
 =head1 Methods
-
 
 =head2 new
 
@@ -105,12 +100,15 @@ and you can manage them however you wish.
 
 =cut
 
+
 sub new {
     my $class = shift;
     my $input = @_;
     my $headers = HTTP::Headers->new;
-    my $json = JSON->new->allow_nonref->allow_blessed->convert_blessed->utf8;
-    $headers->push_header( 'Content-Type' => 'application/json; charset=utf-8', 'Accept-Encoding' => 'gzip,deflate' );
+    my $json = JSON->new->allow_nonref->convert_blessed->utf8;
+    $headers->push_header( 'Content-Type' => 'application/json; charset=utf-8',
+                           'Accept' => 'application/json',
+                           'Accept-Encoding' => 'gzip,deflate' );
 
     my $self = bless {
         uri => 'http://127.0.0.1:8080/',
@@ -123,6 +121,9 @@ sub new {
 
     return $self;
 }
+
+# putting this here in case they decide to change to milliseconds
+sub _default_time { time * 1000; }
 
 sub _build_query {
     my $opt = shift;
@@ -138,16 +139,9 @@ sub _build_query {
         'name' => $opt->{name},
         'type' => $opt->{type},
         'attributes' => $opt->{attributes},
+        'value' => $opt->{value},
     };
-    if ($opt->{values}) {
-        foreach my $value (@{$opt->{values}}) {
-            $query->{value}=$value;
-            push(@$queries,$query);
-        }
-    } else {
-        $query->{value}=$opt->{value};
-        push(@$queries,$query);
-    }
+    push(@$queries,$query);
 
     return $queries;
 }
@@ -181,11 +175,9 @@ sub _cvcb {
     ($cv, $cb);
 }
 
-
 =head2 put
 
     my $result = $newts->put( data => { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', value => 32.333 } );
-    my $result = $newts->put( data => { 'id' => 'server_name', 'name' => 'ifInOctets', 'type' => 'COUNTER', values => [ 32.333, 33 ] } );
 
 Description: Persist new samples
 
@@ -340,20 +332,30 @@ sub measure {
     }
 }
 
-=head2 post_measurements
+=head2 create_report
 
-    $newts->post_measurements(interval => $interval, datasources => [ $ds ], expressions => [ $expression ], exports => [ $export ] ]);
+    $newts->create_report(interval => $interval, datasources => [ $ds ], expressions => [ $expression ], exports => [ $export ] ]);
 
 This sends a POST to /measurements.
 
 Arguments:
+  Report: name of the new report
   Interval in seconds, default '300s'.
   Datasource: Arrayref of Newts::Datasource objects
-  Expressions: Arrayref of Newts::Expressions objects
-  Exports: Arrayref of strings.  These should be the labels for the datasource and expressions used
+  Expressions: Arrayref of Newts::Expressions objects.
+  Exports: Arrayref of strings.  These should be the labels for the datasource
+and expressions you want the report to return.  For instance, if your dataset
+was bytes and you created expressions to calculate Kbytes, then your output
+could have only Kbytes.
+
+You could also do a summary expression of two input datasources, like inOctets
++ outOctets, then export the summary.  See the 15-post-measure.t for an
+example.
 
 Depending on how the Newts object was setup, this will block until completed
 or it will return a condvar to the calling program.
+
+Returns: Returns the matching report output
 
 Here is an example of a raw JSON post sent through curl, in case that is needed for
 troubleshooting:
@@ -385,20 +387,32 @@ troubleshooting:
         ]
     }
 
+See https://github.com/OpenNMS/newts/wiki/ReportDefinitions for more
+information.
+
 =cut
 
-sub post_measurements {
+sub create_report {
     my ($self, %args) = @_;
-    my $uri = $self->uri . 'measurements';
+    my $uri = URI->new($self->uri . "measurements/$args{report}");
     my ($cv, $cb) = $self->_cvcb(\%args);
     $args{interval} ||= '300s';
     $args{interval} =~ s/^(\d+)$/$1s/;
 
+        warn $self->json->encode({
+                        interval => $args{interval},
+                        datasources => $args{datasources},
+                        expressions => $args{expressions},
+                        exports => $args{exports} });
+
     http_request(
-        POST    => $uri,
+        POST    => $uri->as_string,
         headers => $self->headers,
-        body    => $self->json->encode( $args{interval}, $args{datasources},
-                                        $args{expressions}, $args{exports} ),
+        body    => $self->json->encode({
+                        interval => $args{interval},
+                        datasources => $args{datasources},
+                        expressions => $args{expressions},
+                        exports => $args{exports} }),
         $cb
     );
 
@@ -462,6 +476,8 @@ sub new {
     my $self = bless $h, $class;
 }
 
+sub TO_JSON { return { %{ shift() } }; }
+
 1;
 
 package Newts::Datasources;
@@ -478,6 +494,9 @@ sub new {
     my $self = bless $h, $class;
 
     $self->{heartbeat} =~ s/^(\d+)$/$1s/;
+    return $self;
 }
+
+sub TO_JSON { return { %{ shift() } }; }
 
 1;
