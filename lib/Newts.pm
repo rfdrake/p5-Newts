@@ -338,7 +338,7 @@ sub measure {
 
 This sends a POST to /measurements.
 
-Arguments:
+-- Required Arguments:
   Report: name of the new report
   Interval in seconds, default '300s'.
   Datasource: Arrayref of Newts::Datasource objects
@@ -355,37 +355,15 @@ example.
 Depending on how the Newts object was setup, this will block until completed
 or it will return a condvar to the calling program.
 
-Returns: Returns the matching report output
+-- Optional Arguments:
 
-Here is an example of a raw JSON post sent through curl, in case that is needed for
-troubleshooting:
+start=[timespec]
+    Query start time, specified as seconds since the Unix epoch, or an ISO 8601 timestamp.
+end=[timespec]
+    Query end time, specified as seconds since the Unix epoch, or an ISO 8601 timestamp.
+    If you specify a start time but not an end time then this defaults to perl's time()
 
-    curl -X POST  -H "Accept: application/json" -H "Content-Type:
-    application/json" -u admin:admin  -d @newts.json
-    'http://127.0.0.1:18080/measurements/localhost:chassis:temps?start=1998-07-09T12:05:00-0500&end=1998-07-09T13:15:00-0500'
-
-    And newts.json contains:
-    {
-        "interval": "300s",
-        "datasources": [
-            {
-                "label": "ds1",
-                "source": "inlet",
-                "function": "AVERAGE",
-                "heartbeat": "600s"
-            }
-        ],
-        "expressions": [
-            {
-                "label": "ds1-2x",
-                "expression": "2 * ds1"
-            }
-        ],
-        "exports": [
-            "ds1",
-            "ds1-2x"
-        ]
-    }
+-- Returns: Returns the matching report output
 
 See https://github.com/OpenNMS/newts/wiki/ReportDefinitions for more
 information.
@@ -395,15 +373,16 @@ information.
 sub create_report {
     my ($self, %args) = @_;
     my $uri = URI->new($self->uri . "measurements/$args{report}");
+    my $query = {};
+    $query->{start}=$args{start} if ($args{start});
+    $args{end} ||= time if ($args{start});
+    $query->{end}=$args{end} if ($args{end});
+
+    $uri->query_form( $query );
+
     my ($cv, $cb) = $self->_cvcb(\%args);
     $args{interval} ||= '300s';
     $args{interval} =~ s/^(\d+)$/$1s/;
-
-        warn $self->json->encode({
-                        interval => $args{interval},
-                        datasources => $args{datasources},
-                        expressions => $args{expressions},
-                        exports => $args{exports} });
 
     http_request(
         POST    => $uri->as_string,
@@ -421,7 +400,6 @@ sub create_report {
     } else {
         return $cv->recv;
     }
-
 }
 
 
@@ -476,6 +454,13 @@ sub new {
     my $self = bless $h, $class;
 }
 
+=head2 label
+
+getter method for shift->{label};
+
+=cut
+sub label { $_[0]->{label} };
+
 sub TO_JSON { return { %{ shift() } }; }
 
 1;
@@ -496,6 +481,13 @@ sub new {
     $self->{heartbeat} =~ s/^(\d+)$/$1s/;
     return $self;
 }
+
+=head2 label
+
+getter method for shift->{label};
+
+=cut
+sub label { $_[0]->{label} };
 
 sub TO_JSON { return { %{ shift() } }; }
 

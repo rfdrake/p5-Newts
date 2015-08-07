@@ -12,7 +12,7 @@ use Newts;
 use Math::BigInt try => 'GMP';
 
 
-my $ts = '1438819568000';
+my $ts = time*1000;
 my $start = int(($ts-86400)/1000);
 my $end = int(($ts+86400)/1000);
 
@@ -32,13 +32,13 @@ my $t1_get_expected = [
         {
           'type' => 'COUNTER',
           'name' => 'temperature2',
-          'timestamp' => '1438819568000',
+          'timestamp' => $ts,
           'value' => 35
         },
         {
           'type' => 'GAUGE',
           'name' => 'temperature1',
-          'timestamp' => '1438819568000',
+          'timestamp' => $ts,
           'value' => '145'
         }
       ]
@@ -54,7 +54,7 @@ is_deeply($r, [[
             {
               'name' => 'temperature1',
               'value' => 35,
-              'timestamp' => '1438819568000',
+              'timestamp' => $ts,
               'type' => 'COUNTER'
             }
           ]], 'Non-array put');
@@ -170,5 +170,5 @@ my $timer = AnyEvent->timer(interval => 1, cb => sub {
 
 $wait->recv;
 
-my $r = $n2->get( resource => 'bb1-async-test-net' )->recv;
+$r = $n2->get( resource => 'bb1-async-test-net' )->recv;
 use Data::Dumper; warn Dumper($r);
